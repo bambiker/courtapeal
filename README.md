@@ -17,7 +17,9 @@ python -m playwright install chromium
 
 ## הרצה, צעד אחרי צעד
 
-### 1. הקלטת ה-API של האתר (פעם אחת)
+### 1. הקלטת ה-API של האתר (כבר בוצע; נדרש רק אם האתר משתנה)
+
+תבנית החיפוש כבר שמורה ב-`config/search_template.json`. נשאר רק לאמת את כתובת הורדת המסמכים. `fetch` מנסה כמה כתובות אפשריות בעצמו, ואם אף אחת לא עובדת הוא עוצר ומבקש להריץ `discover` ולפתוח מסמך.
 
 ```bash
 python -m courtapeal discover

@@ -154,3 +154,20 @@ def test_admin_struck():
     assert p.lower_judges == "א' דורות"
     assert p.outcome == "struck"
     assert p.panel == ["י' וילנר"]
+
+
+def test_case_number_hyphen_and_not_district():
+    from courtapeal.parse import find_case_numbers
+    assert find_case_numbers('ע"א 4067-24 ובע"פ 1234-05-22') == ['ע"א 4067/24']
+
+
+def test_fetch_helpers():
+    import datetime as dt
+    from courtapeal.fetch import fmt_date, case_type_of, _keep, load_settings
+    assert fmt_date(dt.date(2025, 1, 5), "jerusalem_midnight_utc") == "2025-01-04T22:00:00.000Z"
+    assert fmt_date(dt.date(2025, 7, 5), "jerusalem_midnight_utc") == "2025-07-04T21:00:00.000Z"
+    s = load_settings()
+    assert case_type_of({"CaseDesc": 'רע"א 4067-24'}, s) == 'רע"א'
+    assert _keep({"CaseDesc": 'ע"א 1-24', "Type": "פסק-דין"}, s)
+    assert not _keep({"CaseDesc": 'ע"א 1-24', "Type": "החלטה"}, s)
+    assert not _keep({"CaseDesc": 'בג"ץ 1-24', "Type": "פסק-דין"}, s)

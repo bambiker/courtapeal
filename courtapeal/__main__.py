@@ -20,7 +20,7 @@ from .extract import extract_text
 from .parse import is_appeal_from_district, parse_text
 
 COLUMNS = [
-    "case_number", "case_type", "case_type_desc", "is_leave", "decision_date", "doc_kind",
+    "case_number", "case_name", "doc_id", "meta_doc_type", "case_type", "case_type_desc", "is_leave", "decision_date", "doc_kind",
     "outcome", "outcome_he", "panel", "lower_court", "lower_case", "lower_judges",
     "appellant_lawyers", "respondent_lawyers", "outcome_evidence", "source_file", "all_case_numbers",
 ]
@@ -32,14 +32,27 @@ OUTCOME_HE = {
 
 def cmd_parse(args):
     con = F.db()
-    rows = con.execute("SELECT id, doc_path FROM hits WHERE status IN ('downloaded','parsed')").fetchall()
+    rows = con.execute("SELECT id, doc_path, meta FROM hits WHERE status IN ('downloaded','parsed')").fetchall()
     n_ok = n_err = 0
-    for rid, path in rows:
+    for rid, path, meta in rows:
+        meta = json.loads(meta or "{}")
         try:
             text = extract_text(F.ROOT / path)
             p = parse_text(text)
             row = p.as_row()
             row["source_file"] = path
+            # מטא-דאטה מהחיפוש - אמין יותר מהחילוץ מהטקסט
+            desc = (meta.get("CaseDesc") or "").replace("-", "/")
+            if desc:
+                row["case_numbers"] = "; ".join(dict.fromkeys([desc] + [c for c in row["case_numbers"].split("; ") if c]))
+                if not p.case_type:
+                    p.case_type = row["case_type"] = desc.split(" ")[0]
+            row["case_name"] = meta.get("CaseName", "")
+            row["doc_id"] = meta.get("Id", "")
+            row["meta_doc_type"] = meta.get("Type", "")
+            if not row["decision_date"] and meta.get("VerdictsDtString"):
+                d, m, y = meta["VerdictsDtString"].split("/")
+                row["decision_date"] = f"{y}-{m}-{d}"
             row["_relevant"] = is_appeal_from_district(p, include_leave=not args.no_leave)
             con.execute("INSERT OR REPLACE INTO parsed VALUES(?,?)", (rid, json.dumps(row, ensure_ascii=False)))
             con.execute("UPDATE hits SET status='parsed' WHERE id=?", (rid,))
@@ -63,7 +76,7 @@ def cmd_export(args):
             r = json.loads(row_json)
             if not args.all and not r.get("_relevant"):
                 continue
-            if args.final_only and r.get("doc_kind") != "פסק דין":
+            if args.final_only and "פסק" not in (r.get("meta_doc_type") or r.get("doc_kind") or ""):
                 continue
             r["all_case_numbers"] = r.get("case_numbers", "")
             r["case_number"] = (r.get("case_numbers") or "").split("; ")[0]

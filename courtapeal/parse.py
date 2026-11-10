@@ -52,7 +52,7 @@ def normalize(text: str) -> str:
 
 
 _TYPE_ALT = "|".join(sorted((re.escape(t) for t in ALL_TYPES), key=len, reverse=True))
-CASE_RE = re.compile(rf"(?<![֐-׿\"])({_TYPE_ALT})\s*(\d{{1,6}})\s*/\s*(\d{{2,4}})")
+CASE_RE = re.compile(rf"(?<![֐-׿\"])({_TYPE_ALT})\s*(\d{{1,6}})\s*[/\-]\s*(\d{{2,4}})(?![\-/]?\d)")
 
 
 def find_case_numbers(text: str) -> list[str]:

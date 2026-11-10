@@ -5,7 +5,8 @@
 ## מצב הקוד
 - `courtapeal/parse.py`: חילוץ שדות מטקסט. נבדק רק על דוגמאות סינתטיות (`tests/test_parse.py`).
 - `courtapeal/fetch.py`: הגרסה הראשונה נכתבה בלי גישה לאתר, כי הוא חוסם IP מחו"ל.
-  - ה-URL ב-`config/settings.json`, תבנית ההורדה ושמות השדות הם **ניחוש** שצריך לאמת.
+  - בקשת החיפוש (`SearchVerdicts`), פורמט התאריך ושמות השדות **אומתו** מול האתר. שדות לדוגמה: `sample_record` בתבנית.
+  - `download_url_templates` עדיין **ניחוש**. התבנית הראשונה שמצליחה עוברת אוטומטית לראש הרשימה.
   - הדרך לאמת: `python -m courtapeal discover` (מקליט את בקשות ה-XHR של האתר ל-`data/discovery/`).
   - אחרי ההקלטה, התאם את `config/search_template.json` (`{{FROM}}`/`{{TO}}`) ואת `settings.json`.
 - אם האתר בנוי אחרת ממה שהקוד מניח (למשל דורש דפדוף בתוצאות), שנה את `fetch.py` לפי מה שנקלט.
