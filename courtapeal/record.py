@@ -80,6 +80,12 @@ def record(start_url: str = START_URL):
     con = db()
     rec = Recorder(con)
     seen_urls: set[str] = set()
+    DATA.mkdir(exist_ok=True)
+    log = (DATA / "record.log").open("a", encoding="utf-8")
+
+    def logline(msg: str):
+        log.write(msg + "\n")
+        log.flush()
     print(
         "\nמצב הקלטה. בדפדפן שנפתח:\n"
         "  1. חפש פסקי דין (למשל: סוג מסמך פסק דין, טווח תאריכים).\n"
@@ -87,6 +93,10 @@ def record(start_url: str = START_URL):
         "  3. כשתסיים - סגור את הדפדפן.\n"
         "הכלי לא שולח בקשות משלו - הוא רק שומר את מה שאתה פותח.\n"
     )
+
+    # צופה ה-PDF של Chrome מגיש את הקובץ מכתובת chrome-extension:// פנימית;
+    # זוכרים את כתובת ה-PDF האמיתית האחרונה כדי לקשר אליה
+    last_pdf_url = {"url": None}
 
     def handle_doc(url: str, body: bytes, ctype: str = "", disp: str = ""):
         if url in seen_urls:
@@ -96,6 +106,7 @@ def record(start_url: str = START_URL):
             return
         seen_urls.add(url)
         rid, desc = rec.on_document(url, body, ext)
+        logline(f"SAVED {rid} {ext} {len(body)}B {url}")
         print(f"  ✓ נשמר מסמך #{rec.n_docs}: {desc}")
 
     def on_response(resp):
@@ -105,6 +116,16 @@ def record(start_url: str = START_URL):
             return
         ctype = resp.headers.get("content-type", "")
         disp = resp.headers.get("content-disposition", "")
+        logline(f"{resp.status} {req.method} {req.resource_type} [{ctype}] [{disp}] {req.url}")
+        url = req.url
+        if url.startswith(("http://", "https://")) and "pdf" in ctype.lower():
+            last_pdf_url["url"] = url
+        if url.startswith("chrome-extension://"):
+            if "pdf" not in ctype.lower() or not last_pdf_url["url"]:
+                return
+            url = last_pdf_url["url"]
+            if url in seen_urls:
+                return
         try:
             if "json" in ctype:
                 recs = find_records(resp.json())
@@ -113,17 +134,20 @@ def record(start_url: str = START_URL):
                     print(f"[חיפוש] {len(recs)} תוצאות ({new} חדשות)")
                 return
             if req.resource_type in ("document", "xhr", "fetch", "other") and resp.ok:
-                handle_doc(req.url, resp.body(), ctype, disp)
-        except Exception:
+                handle_doc(url, resp.body(), ctype, disp)
+        except Exception as e:
+            logline(f"  ERR {type(e).__name__}: {e}")
             # הורדות (attachment) לא תמיד חושפות body כאן - נתפסות ב-on_download
             pass
 
     def on_download(download):
+        logline(f"DOWNLOAD {download.url} {download.suggested_filename}")
         try:
             path = download.path()
             if path:
                 handle_doc(download.url, Path(path).read_bytes(), "", "attachment")
         except Exception as e:
+            logline(f"  DOWNLOAD-ERR {e}")
             print(f"  ✗ לא הצלחתי לשמור הורדה: {e}")
 
     def wire_page(page):
@@ -148,6 +172,7 @@ def record(start_url: str = START_URL):
         except Exception:
             pass
 
+    log.close()
     total = con.execute("SELECT COUNT(*) FROM hits WHERE status IN ('downloaded','parsed')").fetchone()[0]
     print(f"\nבסשן הזה נשמרו {rec.n_docs} מסמכים. סה\"כ מסמכים במאגר: {total}.")
     print("הבא בתור:  python -m courtapeal parse   ואז   python -m courtapeal export")
