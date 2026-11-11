@@ -1,7 +1,6 @@
 """שורת פקודה.
 
-    python -m courtapeal discover                       # הקלטת ה-API של האתר (פעם אחת)
-    python -m courtapeal fetch --start 2025-01-01 --end 2025-12-31
+    python -m courtapeal record                         # גלישה באתר; פסקי הדין שתפתח נשמרים
     python -m courtapeal parse                          # חילוץ שדות מכל המסמכים שהורדו
     python -m courtapeal export --out output/appeals_2025.csv
     python -m courtapeal parse-file path/to/decision.pdf   # בדיקה על קובץ בודד
@@ -15,7 +14,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import fetch as F
+from . import store as F
 from .extract import extract_text
 from .parse import is_appeal_from_district, parse_text
 
@@ -99,14 +98,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="courtapeal")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    d = sub.add_parser("discover", help="הקלטת בקשת החיפוש של האתר")
-    d.add_argument("--seconds", type=int, default=600)
-
-    f = sub.add_parser("fetch", help="חיפוש והורדה")
-    f.add_argument("--start", default="2025-01-01")
-    f.add_argument("--end", default="2025-12-31")
-    f.add_argument("--headed", action="store_true", help="להציג את הדפדפן")
-    f.add_argument("--no-download", action="store_true", help="רק חיפוש, בלי הורדת מסמכים")
+    r = sub.add_parser("record", help="מצב הקלטה: גולשים באתר והמסמכים נשמרים")
+    r.add_argument("--url", default=None, help="כתובת פתיחה (ברירת מחדל: מאגר פסקי הדין של העליון)")
 
     p = sub.add_parser("parse", help="ניתוח המסמכים שהורדו")
     p.add_argument("--no-leave", action="store_true", help="לא לכלול בקשות רשות ערעור")
@@ -120,10 +113,9 @@ def main(argv=None):
     pf.add_argument("path")
 
     args = ap.parse_args(argv)
-    if args.cmd == "discover":
-        F.discover(args.seconds)
-    elif args.cmd == "fetch":
-        F.fetch(args.start, args.end, headed=args.headed, download=not args.no_download)
+    if args.cmd == "record":
+        from .record import START_URL, record
+        record(args.url or START_URL)
     elif args.cmd == "parse":
         cmd_parse(args)
     elif args.cmd == "export":

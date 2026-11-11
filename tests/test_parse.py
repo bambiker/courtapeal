@@ -161,13 +161,39 @@ def test_case_number_hyphen_and_not_district():
     assert find_case_numbers('ע"א 4067-24 ובע"פ 1234-05-22') == ['ע"א 4067/24']
 
 
-def test_fetch_helpers():
-    import datetime as dt
-    from courtapeal.fetch import fmt_date, case_type_of, _keep, load_settings
-    assert fmt_date(dt.date(2025, 1, 5), "jerusalem_midnight_utc") == "2025-01-04T22:00:00.000Z"
-    assert fmt_date(dt.date(2025, 7, 5), "jerusalem_midnight_utc") == "2025-07-04T21:00:00.000Z"
-    s = load_settings()
-    assert case_type_of({"CaseDesc": 'רע"א 4067-24'}, s) == 'רע"א'
-    assert _keep({"CaseDesc": 'ע"א 1-24', "Type": "פסק-דין"}, s)
-    assert not _keep({"CaseDesc": 'ע"א 1-24', "Type": "החלטה"}, s)
-    assert not _keep({"CaseDesc": 'בג"ץ 1-24', "Type": "פסק-דין"}, s)
+def test_recorder_links_doc_to_search_result(tmp_path, monkeypatch):
+    import json
+    import sqlite3
+    from courtapeal import record as R
+    from courtapeal.store import doc_ext
+
+    monkeypatch.setattr(R, "DOCS", tmp_path / "docs")
+    monkeypatch.setattr(R, "ROOT", tmp_path)
+    con = sqlite3.connect(":memory:")
+    con.executescript("CREATE TABLE hits(id TEXT PRIMARY KEY, day TEXT, meta TEXT, doc_path TEXT,"
+                      " status TEXT DEFAULT 'new', error TEXT);")
+    rec = R.Recorder(con)
+    fn = "d755773c94010000090037f6ac67c454"
+    meta = {"Id": 813645, "CaseDesc": 'ע"א 4067-24', "Type": "פסק-דין", "FileName": fn,
+            "Path": "NetVerdicts\\2025\\1\\6\\2024-0-4067-8-1"}
+    assert rec.on_search_results([meta]) == 1
+    assert rec.on_search_results([meta]) == 0  # בלי כפילויות
+
+    url = f"https://supremedecisions.court.gov.il/Home/Download?path=x&fileName={fn}&type=2"
+    body = b"PK\x03\x04" + b"0" * 100
+    assert doc_ext(body, "", url) == ".docx"
+    rid, desc = rec.on_document(url, body, ".docx")
+    assert rid == "813645" and 'ע"א 4067-24' in desc
+    status, path = con.execute("SELECT status, doc_path FROM hits WHERE id='813645'").fetchone()
+    assert status == "downloaded" and (tmp_path / path).exists()
+
+    # מסמך שלא קושר לחיפוש - נשמר בכל זאת
+    rid2, _ = rec.on_document("https://x/Home/Download?id=1", b"%PDF-1.4 ...", ".pdf")
+    assert rid2.startswith("url-")
+
+
+def test_doc_ext_ignores_regular_pages():
+    from courtapeal.store import doc_ext
+    page = b"<html>" + "שלום עולם ".encode() * 1000
+    assert doc_ext(page, "text/html", "https://supremedecisions.court.gov.il/") is None
+    assert doc_ext(page, "text/html", "https://supremedecisions.court.gov.il/Home/Download?x=1") == ".html"
