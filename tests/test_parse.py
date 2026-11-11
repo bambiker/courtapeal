@@ -197,3 +197,22 @@ def test_doc_ext_ignores_regular_pages():
     page = b"<html>" + "שלום עולם ".encode() * 1000
     assert doc_ext(page, "text/html", "https://supremedecisions.court.gov.il/") is None
     assert doc_ext(page, "text/html", "https://supremedecisions.court.gov.il/Home/Download?x=1") == ".html"
+
+
+def test_recorder_links_html_page_by_post_body(tmp_path, monkeypatch):
+    import sqlite3
+    from courtapeal import record as R
+    from courtapeal.store import doc_ext
+
+    monkeypatch.setattr(R, "DOCS", tmp_path / "docs")
+    monkeypatch.setattr(R, "ROOT", tmp_path)
+    con = sqlite3.connect(":memory:")
+    con.executescript("CREATE TABLE hits(id TEXT PRIMARY KEY, day TEXT, meta TEXT, doc_path TEXT,"
+                      " status TEXT DEFAULT 'new', error TEXT);")
+    rec = R.Recorder(con)
+    rec.on_search_results([{"Id": 813645, "CaseDesc": 'ע"א 4067-24', "Type": "פסק-דין"}])
+    url = "https://supremedecisions.court.gov.il/Home/GetHtmlPage"
+    body = ("<div>" + "פסק דין " * 200 + "</div>").encode()
+    assert doc_ext(body, "text/html; charset=utf-8", url) == ".html"
+    rid, desc = rec.on_document(url, body, ".html", '{"id":813645,"lan":1}')
+    assert rid == "813645" and 'ע"א 4067-24' in desc

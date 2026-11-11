@@ -16,7 +16,7 @@ import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .store import DATA, DOCS, ROOT, db, doc_ext, file_keys, find_records, safe_name
+from .store import DATA, DOCS, ROOT, db, doc_ext, file_keys, find_records, id_keys, safe_name
 
 START_URL = "https://supremedecisions.court.gov.il/"
 _IGNORE_HOSTS = ("gbqofs.io", "google", "doubleclick", "clarity.ms", "hotjar", "facebook")
@@ -37,6 +37,8 @@ class Recorder:
         for k in ("FileName", "DocName", "Path", "PathForWeb"):
             for key in file_keys(str(rec.get(k) or "")):
                 self.by_key[key] = rid
+        if rec.get("Id"):
+            self.by_key[f"n:{rec['Id']}"] = rid
 
     def on_search_results(self, records: list[dict]) -> int:
         new = 0
@@ -52,12 +54,17 @@ class Recorder:
             self.n_meta += new
         return new
 
-    def on_document(self, url: str, body: bytes, ext: str) -> tuple[str, str]:
-        """שומר מסמך; מחזיר (id, תיאור) לתצוגה."""
+    def on_document(self, url: str, body: bytes, ext: str, post_data: str = "") -> tuple[str, str]:
+        """שומר מסמך; מחזיר (id, תיאור) לתצוגה.
+
+        הקישור לשורת החיפוש: לפי מזהה קובץ (32 hex) בכתובת או בגוף הבקשה,
+        ואם אין - לפי Id מספרי בגוף הבקשה (כך האתר מבקש GetHtmlPage)."""
         with self.lock:
-            rid = next((self.by_key[k] for k in file_keys(url) if k in self.by_key), None)
+            src = f"{url} {post_data or ''}"
+            keys = file_keys(src) + id_keys(post_data or "")
+            rid = next((self.by_key[k] for k in keys if k in self.by_key), None)
             if rid is None:
-                rid = "url-" + hashlib.sha1(url.encode()).hexdigest()[:16]
+                rid = "url-" + hashlib.sha1(src.encode()).hexdigest()[:16]
                 self.con.execute("INSERT OR IGNORE INTO hits(id, meta) VALUES(?, NULL)", (rid,))
             DOCS.mkdir(parents=True, exist_ok=True)
             fn = DOCS / (safe_name(rid) + ext)
@@ -98,15 +105,16 @@ def record(start_url: str = START_URL):
     # זוכרים את כתובת ה-PDF האמיתית האחרונה כדי לקשר אליה
     last_pdf_url = {"url": None}
 
-    def handle_doc(url: str, body: bytes, ctype: str = "", disp: str = ""):
-        if url in seen_urls:
+    def handle_doc(url: str, body: bytes, ctype: str = "", disp: str = "", post_data: str = ""):
+        sig = f"{url}|{post_data or ''}"
+        if sig in seen_urls:
             return
         ext = doc_ext(body, ctype, url, disp)
         if not ext:
             return
-        seen_urls.add(url)
-        rid, desc = rec.on_document(url, body, ext)
-        logline(f"SAVED {rid} {ext} {len(body)}B {url}")
+        seen_urls.add(sig)
+        rid, desc = rec.on_document(url, body, ext, post_data or "")
+        logline(f"SAVED {rid} {ext} {len(body)}B {url} body={(post_data or '')[:300]}")
         print(f"  ✓ נשמר מסמך #{rec.n_docs}: {desc}")
 
     def on_response(resp):
@@ -116,7 +124,9 @@ def record(start_url: str = START_URL):
             return
         ctype = resp.headers.get("content-type", "")
         disp = resp.headers.get("content-disposition", "")
-        logline(f"{resp.status} {req.method} {req.resource_type} [{ctype}] [{disp}] {req.url}")
+        post = req.post_data if req.method == "POST" else ""
+        logline(f"{resp.status} {req.method} {req.resource_type} [{ctype}] [{disp}] {req.url}"
+                + (f" body={post[:300]}" if post else ""))
         url = req.url
         if url.startswith(("http://", "https://")) and "pdf" in ctype.lower():
             last_pdf_url["url"] = url
@@ -124,7 +134,7 @@ def record(start_url: str = START_URL):
             if "pdf" not in ctype.lower() or not last_pdf_url["url"]:
                 return
             url = last_pdf_url["url"]
-            if url in seen_urls:
+            if f"{url}|" in seen_urls:
                 return
         try:
             if "json" in ctype:
@@ -134,9 +144,9 @@ def record(start_url: str = START_URL):
                     print(f"[חיפוש] {len(recs)} תוצאות ({new} חדשות)")
                 return
             if req.resource_type in ("document", "xhr", "fetch", "other") and resp.ok:
-                handle_doc(url, resp.body(), ctype, disp)
+                handle_doc(url, resp.body(), ctype, disp, post)
         except Exception as e:
-            logline(f"  ERR {type(e).__name__}: {e}")
+            logline(f"  ERR {req.method} {req.url}: {type(e).__name__}: {str(e)[:200]}")
             # הורדות (attachment) לא תמיד חושפות body כאן - נתפסות ב-on_download
             pass
 
@@ -152,6 +162,14 @@ def record(start_url: str = START_URL):
 
     def wire_page(page):
         page.on("download", on_download)
+        # מגדילים את מטמון התגובות של הדפדפן (הגדרה מקומית), כדי שתגובות גדולות
+        # לא יימחקו לפני שהספקנו לקרוא אותן ("evicted from inspector cache")
+        try:
+            cdp = page.context.new_cdp_session(page)
+            cdp.send("Network.enable", {"maxTotalBufferSize": 200_000_000,
+                                        "maxResourceBufferSize": 100_000_000})
+        except Exception as e:
+            logline(f"  CDP-ERR {e}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)

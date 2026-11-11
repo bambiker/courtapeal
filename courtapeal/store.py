@@ -56,8 +56,9 @@ def doc_ext(body: bytes, ctype: str = "", url: str = "", disposition: str = "") 
     if h.startswith(b"\xd0\xcf\x11\xe0"):
         return ".doc"
     # HTML נשמר רק אם ברור שזה מסמך (כתובת הורדה / קובץ מצורף), לא סתם עמוד באתר
-    looks_doc = "download" in url.lower() or "attachment" in disposition.lower()
-    if looks_doc and ("html" in ctype or b"<html" in body[:3000].lower()) and len(body) > 3000:
+    u = url.lower()
+    looks_doc = "download" in u or "gethtmlpage" in u or "attachment" in disposition.lower()
+    if looks_doc and ("html" in ctype or b"<" in body[:200]) and len(body) > 1000:
         if re.search("[֐-׿]{3}".encode("utf-8"), body) or b"&#1" in body:
             return ".html"
     return None
@@ -73,3 +74,8 @@ def file_keys(text: str) -> list[str]:
 
 def safe_name(s: str) -> str:
     return re.sub(r"[^\w\-]+", "_", s)[:150]
+
+
+def id_keys(text: str) -> list[str]:
+    """מזהים מספריים (Id / CaseId) שמופיעים בגוף בקשה, כמפתחות 'n:<מספר>'."""
+    return ["n:" + m for m in re.findall(r"(?<![\d])(\d{5,9})(?![\d])", text or "")]
